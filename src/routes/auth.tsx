@@ -1,7 +1,15 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { Apple, Mail, Lock, User as UserIcon } from "lucide-react";
+import { toast } from "sonner";
 import { z } from "zod";
+
+import {
+  createAccountWithEmail,
+  signInDemoAccount,
+  signInWithEmailAndPasswordFirebase,
+  signInWithGoogle,
+} from "../lib/firebase";
 
 const searchSchema = z.object({
   mode: z.enum(["signin", "signup"]).default("signup"),
@@ -16,10 +24,92 @@ function Auth() {
   const { mode } = Route.useSearch();
   const nav = useNavigate();
   const [role, setRole] = useState<"tenant" | "owner">("tenant");
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const redirectAfterAuth = () => {
     nav({ to: role === "owner" ? "/owner" : "/home" });
+  };
+
+  const handleEmailAuth = async () => {
+    if (!email || !password) {
+      toast.error("Please enter an email and password.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      if (mode === "signup") {
+        if (!fullName.trim()) {
+          toast.error("Please enter your full name.");
+          setLoading(false);
+          return;
+        }
+
+        await createAccountWithEmail(email, password);
+        toast.success("Account created successfully.");
+      } else {
+        await signInWithEmailAndPasswordFirebase(email, password);
+        toast.success("Signed in successfully.");
+      }
+
+      redirectAfterAuth();
+    } catch (error: unknown) {
+      const message =
+        typeof error === "object" && error !== null && "message" in error
+          ? String((error as { message?: string }).message)
+          : "Authentication failed.";
+
+      toast.error(message.replace("Firebase: ", ""));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await handleEmailAuth();
+  };
+
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    try {
+      await signInWithGoogle();
+      toast.success("Google sign-in successful.");
+      redirectAfterAuth();
+    } catch (error: unknown) {
+      const message =
+        typeof error === "object" && error !== null && "message" in error
+          ? String((error as { message?: string }).message)
+          : "Google sign-in failed.";
+
+      toast.error(message.replace("Firebase: ", ""));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDemoLogin = async (demoRole: "tenant" | "owner") => {
+    setLoading(true);
+    setRole(demoRole);
+
+    try {
+      await signInDemoAccount(demoRole);
+      toast.success(`Signed in as ${demoRole === "tenant" ? "tenant" : "owner"} demo user.`);
+      redirectAfterAuth();
+    } catch (error: unknown) {
+      const message =
+        typeof error === "object" && error !== null && "message" in error
+          ? String((error as { message?: string }).message)
+          : "Demo sign-in failed.";
+
+      toast.error(message.replace("Firebase: ", ""));
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -51,13 +141,34 @@ function Auth() {
 
         <form onSubmit={submit} className="mt-6 space-y-3">
           {mode === "signup" && (
-            <Field icon={UserIcon} placeholder="Full name" />
+            <Field
+              icon={UserIcon}
+              placeholder="Full name"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+            />
           )}
-          <Field icon={Mail} placeholder="Email address" type="email" />
-          <Field icon={Lock} placeholder="Password" type="password" />
+          <Field
+            icon={Mail}
+            placeholder="Email address"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          <Field
+            icon={Lock}
+            placeholder="Password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
 
-          <button type="submit" className="w-full rounded-full bg-primary text-primary-foreground py-3.5 font-medium mt-2">
-            {mode === "signup" ? "Create account" : "Sign in"}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full rounded-full bg-primary text-primary-foreground py-3.5 font-medium mt-2 disabled:opacity-70"
+          >
+            {loading ? "Please wait..." : mode === "signup" ? "Create account" : "Sign in"}
           </button>
         </form>
 
@@ -68,12 +179,41 @@ function Auth() {
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <button className="rounded-full border border-border py-3 text-sm flex items-center justify-center gap-2 hover:bg-muted transition">
+          <button
+            type="button"
+            onClick={handleGoogleLogin}
+            disabled={loading}
+            className="rounded-full border border-border py-3 text-sm flex items-center justify-center gap-2 hover:bg-muted transition disabled:opacity-70"
+          >
             <svg viewBox="0 0 24 24" className="h-4 w-4"><path fill="currentColor" d="M21.35 11.1H12v3.2h5.35c-.23 1.4-1.65 4.1-5.35 4.1-3.22 0-5.85-2.66-5.85-5.95S8.78 6.5 12 6.5c1.83 0 3.06.78 3.76 1.45l2.57-2.48C16.7 3.87 14.55 3 12 3 6.98 3 3 6.98 3 12s3.98 9 9 9c5.2 0 8.63-3.65 8.63-8.8 0-.59-.06-1.03-.13-1.1z"/></svg>
             Google
           </button>
-          <button className="rounded-full border border-border py-3 text-sm flex items-center justify-center gap-2 hover:bg-muted transition">
-            <Apple className="h-4 w-4" /> Apple
+          <button
+            type="button"
+            onClick={() => handleDemoLogin(role)}
+            disabled={loading}
+            className="rounded-full border border-border py-3 text-sm flex items-center justify-center gap-2 hover:bg-muted transition disabled:opacity-70"
+          >
+            <Apple className="h-4 w-4" /> Demo
+          </button>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => handleDemoLogin("tenant")}
+            disabled={loading}
+            className="rounded-full bg-forest/10 border border-forest/30 px-3 py-2 text-xs font-medium text-forest hover:bg-forest/15 transition disabled:opacity-70"
+          >
+            One-click tenant demo
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDemoLogin("owner")}
+            disabled={loading}
+            className="rounded-full bg-forest/10 border border-forest/30 px-3 py-2 text-xs font-medium text-forest hover:bg-forest/15 transition disabled:opacity-70"
+          >
+            One-click owner demo
           </button>
         </div>
 
